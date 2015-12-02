@@ -8,12 +8,11 @@ platforms:
     driver_config:
       username: ubuntu
 suites:
-  - name: load-balancer
+  - name: hello_world
     run_list:
-      - recipe[app_nginx]
+      - recipe[hw_goapp]
     attributes:
-  - name: app
-    run_list:
-      - recipe[golang]
-      - recipe[application]
-    attributes:
+      go:
+        owner: "ubuntu",
+        packages: 
+          - "github.com/cvlc/hello_world"

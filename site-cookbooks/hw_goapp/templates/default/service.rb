@@ -1,18 +1,18 @@
 #!/bin/sh
 ### BEGIN INIT INFO
-# Provides:          <% @namae %>
+# Provides:          <%= @name %>
 # Required-Start:    $local_fs $network $named $time $syslog
 # Required-Stop:     $local_fs $network $named $time $syslog
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
-# Description:       <% @description %>
+# Description:       <%= @description %>
 ### END INIT INFO
 
-SCRIPT=<% @command %>
-RUNAS=<% @username %>
+SCRIPT=<%= @command %>
+RUNAS=<%= @username %>
 
-PIDFILE=/var/run/<% @name %>.pid
-LOGFILE=/var/log/<% @name %>.log
+PIDFILE=/var/run/<%= @name %>.pid
+LOGFILE=/var/log/<%= @name %>.log
 
 start() {
   if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE"); then

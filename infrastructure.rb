@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion "2010-09-09"
-Description "Creates and deployes 2 auto-scaling groups, one for an nginx load balancer and one for an app"
+Description "Creates and deployes an auto-scaling group for a Go webapp with associated ELB and bootstraps nodes with Chef automatically"
 Parameters do
   KeyName do
     Description "Name of an EC2 keypair to enable SSH access"
@@ -31,10 +31,20 @@ Parameters do
     AllowedPattern "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
     ConstraintDescription "must be a valid IP CIDR range of the form x.x.x.x/x."
   end
-  ChefRepo do
-    Description "The URL for the git repository from which to deploy the app server"
+  ChefRepoBranch do
+    Description "The branch of the git repository from which to deploy the app server"
     Type "String"
-    Default "https://github.com/cvlc/hello_world"
+    Default "master"
+  end
+  ChefRepo do
+    Description "The name of the git repository from which to deploy the app server"
+    Type "String"
+    Default "hello_world"
+  end
+  ChefRepoURL do
+    Description "The prefix URL of the git repository from which to deploy the app server"
+    Type "String"
+    Default "https://github.com/cvlc/" 
   end
 end
 Mappings do
@@ -118,9 +128,9 @@ Resources do
     Metadata do
       AWS__CloudFormation__Init do
         configSets do
-          order "fileSet"
+            chef [ "configureSet", "prepareSet", "installSet" ]
         end
-        fileSet do
+        configureSet do
           files do
             _path("/etc/chef/solo.rb") do
               content do
@@ -130,36 +140,45 @@ Resources do
                   "log_level :info\n", 
                   "log_location STDOUT\n", 
                   "file_cache_path \"/var/chef-solo\"\n", 
-                  "cookbook_path \"/var/chef-solo/cookbooks\"\n", 
+                  "cookbook_path [ \"/var/chef-solo/cookbooks\",\n",
+                  "                \"/var/chef-solo/site-cookbooks\" ]\n", 
                   "json_attribs \"",
+                  _{ Ref "ChefRepoURL" },
                   _{ Ref "ChefRepo" },
-                  "/master/node.json",
+                  "/raw/",
+                  _{ Ref "ChefRepoBranch" },
+                  "/node.json",
                   "\"\n", 
-                  "recipe_url \"",
-                  _{ Ref "ChefRepo" },
-                  "/archive/master.tar.gz"
-                  "\"\n"
                 ] ]
               end
               mode "000644"
               owner "root"
-              group "wheel"
+              group "sudo"
             end
-            _path("/etc/chef/node.json") do
-              content do
-                Fn__Join [ "\n", 
-                [
-                  "\"run_list\": [ \"recipe[hw_goapp]\" ],",
-                  "\"go\": {",
-                  "  \"packages\": [\"",
-                  "    \"github.com/cvlc/hello_world\"",
-                  "  ],",
-                  "  \"owner\": \"ubuntu\"" 
-                ]
+          end
+        end
+        prepareSet do
+          commands do
+            prepare_chef_solo do
+              command do
+                Fn__Join [ "",
+                [ "wget -O - ",
+                  _{ Ref "ChefRepoURL" },
+                  "/",
+                  _{ Ref "ChefRepo" },
+                  "/archive/",
+                  _{ Ref "ChefRepoBranch" },
+                  ".tar.gz | tar --strip-components=1 -C /var/chef-solo -xvzf -" 
+                ] ]
               end
-              mode "000644"
-              owner "root"
-              group "wheel"
+            end
+          end
+        end
+        installSet do
+          commands do
+            install_cookbooks do
+              command "HOME=/root librarian-chef install"
+              cwd "/var/chef-solo"
             end
           end
         end
@@ -206,6 +225,8 @@ Resources do
               "apt-get update\n",
               "env DEBIAN_FRONTEND=noninteractive apt-get install -y awscli chef python-setuptools\n",
               "easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz\n",
+              "gem install librarian-chef\n",
+              "mkdir -p /var/chef-solo\n",
               "function error_exit\n",
               "{\n",
               "  /usr/local/bin/cfn-signal -e 1 -r \"$1\" '", 
@@ -224,6 +245,7 @@ Resources do
               _{
                 Ref "AWS::Region"
               },
+              " -c chef",
               "> /var/log/cfn-init.log || error_exit 'Failed to run cfn-init'\n",
               "/usr/local/bin/cfn-hup || error_exit 'Failed to start cfn-hup'\n",
               "chef-solo || error_exit 'Failed to bootstrap with chef-solo'\n",

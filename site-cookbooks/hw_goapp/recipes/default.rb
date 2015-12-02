@@ -14,6 +14,13 @@ runas = node["go"]["owner"]
 app_packages.each do |package|
   app_name = package.split('/')[-1]
 
+  file "/var/log/#{app_name}.log" do
+    mode "0750"
+    owner "#{runas}"
+    group "root"
+    action :create_if_missing
+  end
+
   template "/etc/init.d/#{app_name}" do
     source "service.rb"
     mode "0755"
