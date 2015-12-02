@@ -1,4 +1,2 @@
 site 'http://supermarket.getchef.com/api/v1'
-cookbook 'nginx', '~> 2.7.6'
-cookbook 'application_nginx', '~> 2.0.2'
 cookbook 'golang', '~> 1.7.0'

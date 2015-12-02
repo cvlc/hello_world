@@ -1,0 +1,19 @@
+---
+driver: 
+  name: vagrant
+provisioner:
+  name: chef_solo
+platforms:
+  - name: ubuntu-14.04
+    driver_config:
+      username: ubuntu
+suites:
+  - name: load-balancer
+    run_list:
+      - recipe[app_nginx]
+    attributes:
+  - name: app
+    run_list:
+      - recipe[golang]
+      - recipe[application]
+    attributes:

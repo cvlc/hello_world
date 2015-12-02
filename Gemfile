@@ -1,4 +1,6 @@
 source "https://rubygems.org"
 gem "kumogata"
+gem "test-kitchen"
 gem "knife-solo"
 gem "librarian-chef"
+gem "foodcritic"

@@ -1,0 +1,9 @@
+"run_list": [ 
+  "recipe[hw_goapp]" 
+],
+"go": {
+  "owner": "ubuntu"
+  "packages": [
+    "github.com/cvlc/hello_world"
+  ],
+},

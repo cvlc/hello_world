@@ -5,29 +5,12 @@ Parameters do
     Description "Name of an EC2 keypair to enable SSH access"
     Type "String"
   end
-  LBType do
-    Description "Load balancer instance type"
-    Type "String"
-    Default "t1.micro"
-    AllowedValues "t1.micro", "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m3.xlarge", "m3.2xlarge", "c1.medium", "c1.xlarge", "cc1.4xlarge", "cc2.8xlarge", "cg1.4xlarge"
-    ConstraintDescription "must be a valid EC2 instance type."
-  end
   AppType do
     Description "App instance type"
     Type "String"
-    Default "t1.micro"
-    AllowedValues "t1.micro", "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m3.xlarge", "m3.2xlarge", "c1.medium", "c1.xlarge", "cc1.4xlarge", "cc2.8xlarge", "cg1.4xlarge"
+    Default "m3.medium"
+    AllowedValues "m4.large", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge", "c3.2xlarge"
     ConstraintDescription "must be a valid EC2 instance type."
-  end
-  LBGroupSize do
-    Default 1
-    Description "The default number of EC2 instances for the load balancer cluster"
-    Type "Number"
-  end
-  LBMaxSize do
-    Default 1
-    Description "The maximum number of EC2 instances for the load balancer cluster"
-    Type "Number"
   end
   AppGroupSize do
     Default 1
@@ -48,14 +31,15 @@ Parameters do
     AllowedPattern "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
     ConstraintDescription "must be a valid IP CIDR range of the form x.x.x.x/x."
   end
+  ChefRepo do
+    Description "The URL for the git repository from which to deploy the app server"
+    Type "String"
+    Default "https://github.com/cvlc/hello_world"
+  end
 end
 Mappings do
   AWSInstanceType2Arch(
-    {"t2.micro"=>{"Arch"=>"64"},
-     "t2.small"=>{"Arch"=>"64"},
-     "t2.medium"=>{"Arch"=>"64"},
-     "t2.large"=>{"Arch"=>"64"},
-     "m4.large"=>{"Arch"=>"64"},
+     {"m4.large"=>{"Arch"=>"64"},
      "m3.medium"=>{"Arch"=>"64HVM"},
      "m3.large"=>{"Arch"=>"64HVM"},
      "m3.xlarge"=>{"Arch"=>"64HVM"},
@@ -80,29 +64,38 @@ Mappings do
       {"64"=>"ami-840184e8", "64HVM"=>"ami-0b0f8a67"}})
 end
 Resources do
-  LBServerGroup do
-    Type "AWS::AutoScaling::AutoScalingGroup"
+  AppServerLB do
+    Type "AWS::ElasticLoadBalancing::LoadBalancer"
     Properties do
-      LaunchConfigurationName do
-        Ref "LBLaunchConfig"
-      end
+      CrossZone "true"
       AvailabilityZones do
         Fn__GetAZs do
           Ref "AWS::Region"
         end
       end
-      MinSize 0
-      MaxSize do
-        Ref "LBMaxSize"
+      HealthCheck do 
+        HealthyThreshold 2
+        UnhealthyThreshold 2
+        Interval 20
+        Timeout 10
+        Target "TCP:8484"
       end
-      DesiredCapacity do
-        Ref "LBGroupSize"
-      end
+      Listeners [
+        _{
+          InstancePort 8484
+          LoadBalancerPort 80
+          Protocol "HTTP"
+          InstanceProtocol "HTTP"
+         } 
+      ]
     end
   end
   AppServerGroup do
     Type "AWS::AutoScaling::AutoScalingGroup"
     Properties do
+      LoadBalancerNames [
+        _{ Ref "AppServerLB" }
+      ]
       LaunchConfigurationName do
         Ref "AppLaunchConfig"
       end
@@ -120,40 +113,33 @@ Resources do
       end
     end
   end
-  LaunchConfig do
+  AppLaunchConfig do
     Type "AWS::AutoScaling::LaunchConfiguration"
     Metadata do
       AWS__CloudFormation__Init do
         configSets do
-          order "collectSet", "fileSet", "commandSet"
-        end
-        collectSet do
-          commands do
-            collect_instances do
-              command do
-                Fn__Join [
-                  "aws ec2 describe-instances --filters \"Name=tag:aws:autoscaling:groupName,Values=",
-               _{ Ref "AppServerGroup" },
-                  "\" \"Name=instance-state-name,Values=running\" | grep -o '\"i-[0-9a-f]\\+\"' | grep -o '[^\"]\\+'\" > /tmp/known_app_instances",
-                  "\n"
-                ]
-              end
-            end
-          end
+          order "fileSet"
         end
         fileSet do
           files do
             _path("/etc/chef/solo.rb") do
               content do
-                Fn__Join [
+                Fn__Join [ "",
+                [
                   "\n",
-                  "log_level :info", 
-                  "log_location STDOUT", 
-                  "file_cache_path \"/var/chef-solo\"", 
-                  "cookbook_path \"/var/chef-solo/cookbooks\"", 
-                  "json_attribs \"/etc/chef/node.json\"", 
-                  "recipe_url \"https://github.com/cvlc/hello_world/archive/master.tar.gz\""
-                ]
+                  "log_level :info\n", 
+                  "log_location STDOUT\n", 
+                  "file_cache_path \"/var/chef-solo\"\n", 
+                  "cookbook_path \"/var/chef-solo/cookbooks\"\n", 
+                  "json_attribs \"",
+                  _{ Ref "ChefRepo" },
+                  "/master/node.json",
+                  "\"\n", 
+                  "recipe_url \"",
+                  _{ Ref "ChefRepo" },
+                  "/archive/master.tar.gz"
+                  "\"\n"
+                ] ]
               end
               mode "000644"
               owner "root"
@@ -161,6 +147,15 @@ Resources do
             end
             _path("/etc/chef/node.json") do
               content do
+                Fn__Join [ "\n", 
+                [
+                  "\"run_list\": [ \"recipe[hw_goapp]\" ],",
+                  "\"go\": {",
+                  "  \"packages\": [\"",
+                  "    \"github.com/cvlc/hello_world\"",
+                  "  ],",
+                  "  \"owner\": \"ubuntu\"" 
+                ]
               end
               mode "000644"
               owner "root"
@@ -168,20 +163,18 @@ Resources do
             end
           end
         end
-        commandSet do
-        end
       end
     end
     Properties do
       InstanceType do
-        Ref "LBType"
+        Ref "AppType"
       end
       SecurityGroups [
         _{
           Ref "SSHGroup"
         },
         _{
-          Ref "LBGroup"
+          Ref "AppGroup"
         }
       ]
       ImageId do
@@ -194,7 +187,7 @@ Resources do
             Fn__FindInMap [
               "AWSInstanceType2Arch",
               _{
-                Ref "FrontendType"
+                Ref "AppType"
               },
               "Arch"
             ]
@@ -215,14 +208,18 @@ Resources do
               "easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz\n",
               "function error_exit\n",
               "{\n",
-              "  /usr/local/bin/cfn-signal -e 1 -r \"$1\" '", { "Ref" : "WaitHandle" }, "'\n",
+              "  /usr/local/bin/cfn-signal -e 1 -r \"$1\" '", 
+              _{ 
+                Ref "AppWaitHandle" 
+              }, 
+              "'\n",
               "  exit 1\n",
               "}\n",
               "/usr/local/bin/cfn-init -s ",
               _{
                 Ref "AWS::StackId"
               },
-              " -r LBLaunchConfig ",
+              " -r AppLaunchConfig ",
               "         --region ",
               _{
                 Ref "AWS::Region"
@@ -232,7 +229,7 @@ Resources do
               "chef-solo || error_exit 'Failed to bootstrap with chef-solo'\n",
               "/usr/local/bin/cfn-signal -e $? -r \"Instance bootstrap complete\" '",
               _{
-                Ref "WaitHandle"
+                Ref "AppWaitHandle"
               },
               "'\n"
             ]
@@ -241,15 +238,15 @@ Resources do
       end
     end
   end
-  WaitHandle do
+  AppWaitHandle do
     Type "AWS::CloudFormation::WaitConditionHandle"
   end
-  WaitCondition do
+  AppWaitCondition do
     Type "AWS::CloudFormation::WaitCondition"
-    DependsOn "LBGroup"
+    DependsOn "AppGroup"
     Properties do
       Handle do
-        Ref "WaitHandle"
+        Ref "AppWaitHandle"
       end
       Timeout 600
     end
@@ -270,20 +267,6 @@ Resources do
       ]
     end
   end
-  LBGroup do
-    Type "AWS::EC2::SecurityGroup"
-    Properties do
-      GroupDescription "Enable HTTP access via port 80"
-      SecurityGroupIngress [
-        _{
-          IpProtocol "tcp"
-          FromPort 80
-          ToPort 80
-          CidrIp "0.0.0.0/0"
-        }
-      ]
-    end
-  end
   AppGroup do
     Type "AWS::EC2::SecurityGroup"
     Properties do
@@ -293,13 +276,22 @@ Resources do
           IpProtocol "tcp"
           FromPort 8484
           ToPort 8484
-          SourceSecurityGroupName do
-            Ref "LBGroup"
-          end
+          SourceSecurityGroupOwnerId "amazon-elb"
+          SourceSecurityGroupName "amazon-elb-sg"
         }
       ]
     end
   end
 end
 Outputs do
+  URL do
+    Description "The DNS name used to access the application"
+    Value do
+      Fn__Join [ "",
+      [
+        "http://",
+        _{ Fn__GetAtt "AppServerLB", "DNSName" } 
+      ] ]
+  end
+end
 end
