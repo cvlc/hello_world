@@ -30,6 +30,7 @@ Optional parameters are in square brackets, refer to the list below for a descri
 
 ## TODO
 - Add cfn-hup hook so chef-solo is automatically triggered on updates (currently, you need to kick it on existing instances or rescale them)
+- Automate DNS management with Route53
 - Split out repositories for Chef, app, etc.
 - Split out hw_goapp cookbook into it's own repository and genericize it.
 - Support VPC configurations
